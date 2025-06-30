@@ -50,9 +50,14 @@ public class JwtUtil {
                 .setClaims(claims)
                 .setSubject(subject)
                 .setIssuedAt(new Date(System.currentTimeMillis()))
-                .setExpiration(new Date(System.currentTimeMillis() + jwtExpirationInMs))
+                .setExpiration(getExpirationDate())
                 .signWith(key)
                 .compact();
+    }
+
+    // Added this method to allow for overriding in tests
+    protected Date getExpirationDate() {
+        return new Date(System.currentTimeMillis() + jwtExpirationInMs);
     }
 
     public Boolean validateToken(String token, UserDetails userDetails) {
