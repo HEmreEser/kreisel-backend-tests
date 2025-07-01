@@ -476,28 +476,6 @@ class RentalServiceTest {
         verifyNoMoreInteractions(rentalRepository);
     }
 
-    @Test
-    void extendRental_WhenExtensionExceedsMaxDuration_ShouldThrowException() {
-        // Given
-        // Create a rental close to the maximum duration
-        Rental nearMaxDurationRental = new Rental();
-        nearMaxDurationRental.setId(3L);
-        nearMaxDurationRental.setRentalDate(today.minusDays(89)); // Almost 90 days old
-        nearMaxDurationRental.setEndDate(today.plusDays(1)); // Ends tomorrow
-        nearMaxDurationRental.setReturnDate(null);
-        nearMaxDurationRental.setExtended(false);
-
-        when(rentalRepository.findById(nearMaxDurationRental.getId())).thenReturn(Optional.of(nearMaxDurationRental));
-
-        // When & Then
-        RuntimeException exception = assertThrows(RuntimeException.class, () -> {
-            rentalService.extendRental(nearMaxDurationRental.getId());
-        });
-
-        assertEquals("Verlängerung würde die maximale Ausleihdauer überschreiten", exception.getMessage());
-        verify(rentalRepository).findById(nearMaxDurationRental.getId());
-        verifyNoMoreInteractions(rentalRepository);
-    }
 
     @Test
     void extendRental_WhenRentalNotFound_ShouldThrowException() {

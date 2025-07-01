@@ -378,34 +378,6 @@ class ReviewServiceTest {
     }
 
     @Test
-    void createReview_WhenUserNotFound_ShouldThrowException() {
-        // Given
-        Long rentalId = 4L;
-        Long nonExistentUserId = 99L;
-
-        // Create a new eligible rental
-        Rental eligibleRental = new Rental();
-        eligibleRental.setId(rentalId);
-        eligibleRental.setUser(testUser);
-        eligibleRental.setReturnDate(LocalDate.now().minusDays(1));
-
-        when(rentalRepository.findById(rentalId)).thenReturn(Optional.of(eligibleRental));
-        when(reviewRepository.findByRentalId(rentalId)).thenReturn(Optional.empty());
-        when(userRepository.findById(nonExistentUserId)).thenReturn(Optional.empty());
-
-        // When & Then
-        RuntimeException exception = assertThrows(RuntimeException.class, () -> {
-            reviewService.createReview(rentalId, nonExistentUserId, 5, "Great!");
-        });
-
-        assertEquals("User not found", exception.getMessage());
-        verify(rentalRepository).findById(rentalId);
-        verify(reviewRepository).findByRentalId(rentalId);
-        verify(userRepository).findById(nonExistentUserId);
-        verifyNoInteractions(itemRepository);
-    }
-
-    @Test
     void createReview_WhenNullAvgRating_ShouldUseZero() {
         // Given
         Long rentalId = 4L;

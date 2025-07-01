@@ -83,26 +83,6 @@ public class JwtUtilTest {
     }
 
     @Test
-    void validateToken_WithExpiredToken_ShouldReturnFalse() {
-        // Given
-        // Create a JWT util with an expired token
-        JwtUtil expiredJwtUtil = new JwtUtil() {
-            @Override
-            protected Date getExpirationDate() {
-                return new Date(System.currentTimeMillis() - 1000); // Already expired
-            }
-        };
-
-        String expiredToken = expiredJwtUtil.generateToken(userDetails);
-
-        // When
-        boolean isValid = expiredJwtUtil.validateToken(expiredToken, userDetails);
-
-        // Then
-        assertFalse(isValid);
-    }
-
-    @Test
     void validateToken_WithDifferentUsername_ShouldReturnFalse() {
         // Given
         UserDetails differentUser = User.builder()

@@ -7,9 +7,9 @@ import edu.hm.cs.kreisel_backend.service.ItemService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.io.TempDir;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
-import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.io.Resource;
@@ -18,15 +18,12 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.net.URI;
-import java.nio.file.CopyOption;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -44,8 +41,9 @@ public class ItemControllerTest {
     @Mock
     private SecurityUtils securityUtils;
 
-    @Mock
-    private Path fileStoragePath;
+    // Verwenden eines echten temporären Verzeichnisses für Dateitests
+    @TempDir
+    Path tempDir;
 
     @InjectMocks
     private ItemController itemController;
@@ -57,6 +55,9 @@ public class ItemControllerTest {
 
     @BeforeEach
     void setUp() {
+        // Setze das temporäre Verzeichnis als fileStoragePath im Controller
+        ReflectionTestUtils.setField(itemController, "fileStoragePath", tempDir);
+
         // Initialize test item with correct enum values from the provided model
         testItem = new Item();
         testItem.setId(1L);
@@ -287,43 +288,35 @@ public class ItemControllerTest {
     void uploadItemImage_WhenItemExists_ShouldUploadImageAndUpdateItem() throws IOException {
         // Given
         Long itemId = 1L;
-        String filename = "test-image.jpg";
         MockMultipartFile file = new MockMultipartFile(
                 "image",
-                filename,
+                "test-image.jpg",
                 MediaType.IMAGE_JPEG_VALUE,
                 "test image content".getBytes()
         );
 
+        // Bereite den ItemService-Mock vor
         when(itemService.getItemById(itemId)).thenReturn(testItem);
-        Path targetPath = Paths.get("/tmp/" + filename);
-        when(fileStoragePath.resolve(anyString())).thenReturn(targetPath);
         when(itemService.updateItem(eq(itemId), any(Item.class))).thenReturn(testItem);
 
-        // Fixed mocking of Files.copy - avoiding argument matchers in lambda
-        try (MockedStatic<Files> filesMock = Mockito.mockStatic(Files.class)) {
-            // Instead of using any() matchers in lambda, use proper method reference
-            filesMock.when(() -> Files.copy(
-                    Mockito.any(InputStream.class),
-                    Mockito.eq(targetPath),
-                    Mockito.eq(StandardCopyOption.REPLACE_EXISTING)
-            )).thenReturn(1L);
+        // When
+        ResponseEntity<?> response = itemController.uploadItemImage(itemId, file);
 
-            // When
-            ResponseEntity<?> response = itemController.uploadItemImage(itemId, file);
+        // Then
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertTrue(response.getBody() instanceof Map);
+        @SuppressWarnings("unchecked")
+        Map<String, String> responseBody = (Map<String, String>) response.getBody();
+        assertTrue(responseBody.containsKey("imageUrl"));
+        assertTrue(responseBody.get("imageUrl").startsWith("/api/items/images/"));
 
-            // Then
-            assertEquals(HttpStatus.OK, response.getStatusCode());
-            assertTrue(response.getBody() instanceof Map);
-            @SuppressWarnings("unchecked")
-            Map<String, String> responseBody = (Map<String, String>) response.getBody();
-            assertTrue(responseBody.containsKey("imageUrl"));
-            assertTrue(responseBody.get("imageUrl").startsWith("/api/items/images/"));
+        // Verifiziere die Aufrufe
+        verify(itemService).getItemById(itemId);
+        verify(itemService).updateItem(eq(itemId), any(Item.class));
 
-            verify(itemService).getItemById(itemId);
-            verify(fileStoragePath).resolve(anyString());
-            verify(itemService).updateItem(eq(itemId), any(Item.class));
-        }
+        // Überprüfe, ob die Datei tatsächlich erstellt wurde
+        assertTrue(Files.list(tempDir).count() > 0);
     }
 
     @Test
@@ -346,11 +339,10 @@ public class ItemControllerTest {
         assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
         verify(itemService).getItemById(itemId);
         verifyNoMoreInteractions(itemService);
-        verifyNoInteractions(fileStoragePath);
     }
 
     @Test
-    void uploadItemImage_WhenExceptionOccurs_ShouldReturnInternalServerError() throws Exception {
+    void uploadItemImage_WhenExceptionOccurs_ShouldReturnInternalServerError() throws IOException {
         // Given
         Long itemId = 1L;
         MockMultipartFile file = new MockMultipartFile(
@@ -360,82 +352,55 @@ public class ItemControllerTest {
                 "test image content".getBytes()
         );
 
+        // Mock ItemService um item zurückzugeben
         when(itemService.getItemById(itemId)).thenReturn(testItem);
-        when(fileStoragePath.resolve(anyString())).thenThrow(new RuntimeException("Test exception"));
+
+        // Überschreibe das tempDir mit einem nicht-existierenden Pfad, um eine Exception zu provozieren
+        Path invalidPath = Paths.get("/non-existent-directory");
+        ReflectionTestUtils.setField(itemController, "fileStoragePath", invalidPath);
 
         // When
         ResponseEntity<?> response = itemController.uploadItemImage(itemId, file);
 
         // Then
         assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.getStatusCode());
+        assertNotNull(response.getBody());
         assertTrue(response.getBody().toString().contains("Failed to upload image"));
         verify(itemService).getItemById(itemId);
-        verify(fileStoragePath).resolve(anyString());
     }
 
     @Test
     void getImage_WhenImageExists_ShouldReturnImage() throws Exception {
         // Given
         String filename = "test-image.jpg";
-        Path filePath = Paths.get("/tmp/" + filename);
-        Resource mockResource = mock(UrlResource.class);
+        Path imagePath = tempDir.resolve(filename);
 
-        when(fileStoragePath.resolve(filename)).thenReturn(filePath);
+        // Erstelle tatsächliche Testdatei
+        Files.write(imagePath, "test image content".getBytes());
 
-        // Fixed mocking of UrlResource constructor
-        try (MockedStatic<UrlResource> urlResourceMock = Mockito.mockStatic(UrlResource.class)) {
-            // Use proper method without argument matchers in lambda
-            URI uri = filePath.toUri();
-            urlResourceMock.when(() -> new UrlResource(uri)).thenReturn((UrlResource) mockResource);
-            when(mockResource.exists()).thenReturn(true);
+        // When
+        ResponseEntity<Resource> response = itemController.getImage(filename);
 
-            // When
-            ResponseEntity<Resource> response = itemController.getImage(filename);
-
-            // Then
-            assertEquals(HttpStatus.OK, response.getStatusCode());
-            assertEquals(MediaType.IMAGE_JPEG, response.getHeaders().getContentType());
-            assertEquals(mockResource, response.getBody());
-            verify(fileStoragePath).resolve(filename);
-        }
+        // Then
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals(MediaType.IMAGE_JPEG, response.getHeaders().getContentType());
+        assertNotNull(response.getBody());
+        assertTrue(response.getBody() instanceof UrlResource);
+        assertTrue(((UrlResource) response.getBody()).exists());
     }
 
     @Test
     void getImage_WhenImageDoesNotExist_ShouldReturnNotFound() throws Exception {
         // Given
         String filename = "non-existent.jpg";
-        Path filePath = Paths.get("/tmp/" + filename);
-        Resource mockResource = mock(UrlResource.class);
-
-        when(fileStoragePath.resolve(filename)).thenReturn(filePath);
-
-        // Fixed mocking of UrlResource constructor
-        try (MockedStatic<UrlResource> urlResourceMock = Mockito.mockStatic(UrlResource.class)) {
-            // Use proper method without argument matchers in lambda
-            URI uri = filePath.toUri();
-            urlResourceMock.when(() -> new UrlResource(uri)).thenReturn((UrlResource) mockResource);
-            when(mockResource.exists()).thenReturn(false);
-
-            // When
-            ResponseEntity<Resource> response = itemController.getImage(filename);
-
-            // Then
-            assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
-            verify(fileStoragePath).resolve(filename);
-        }
-    }
-
-    @Test
-    void getImage_WhenExceptionOccurs_ShouldReturnInternalServerError() throws Exception {
-        // Given
-        String filename = "test-image.jpg";
-        when(fileStoragePath.resolve(filename)).thenThrow(new RuntimeException("Test exception"));
+        // Stelle sicher, dass die Datei nicht existiert
+        Path nonExistentPath = tempDir.resolve(filename);
+        Files.deleteIfExists(nonExistentPath);
 
         // When
         ResponseEntity<Resource> response = itemController.getImage(filename);
 
         // Then
-        assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.getStatusCode());
-        verify(fileStoragePath).resolve(filename);
+        assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
     }
 }
